@@ -19,7 +19,14 @@ import {
 } from "@/lib/store/library";
 import { maskToDataUrl } from "@/lib/render/draw";
 import type { Gray } from "@/lib/scan/image";
-import type { GlyphMask, LineInk, PageScan, ScannedGlyph, ScannedLine } from "@/lib/scan/scanPage";
+import {
+  looksLikeTemplate,
+  type GlyphMask,
+  type LineInk,
+  type PageScan,
+  type ScannedGlyph,
+  type ScannedLine,
+} from "@/lib/scan/scanPage";
 import { useGuide } from "./GuideContext";
 import { AlertIcon, CheckIcon, LockIcon, TrashIcon, UploadIcon } from "./Icons";
 import { Playground } from "./Playground";
@@ -32,7 +39,8 @@ type Photo = {
   startOverride: number | null;
   /** Stable id for this photo's bytes. Null until hashed. */
   hash: string | null;
-  kind: PageKind;
+  /** Set once the page has been scanned. Null while it is still waiting. */
+  kind: PageKind | null;
 };
 type Result =
   | { status: "scanning"; startLine: number }
@@ -106,6 +114,12 @@ async function postRead(image: string, extra: { repeats?: number; mode?: "notes"
 
 const isRedo = (r: RowRead) => r.status === "failed" || (r.status === "done" && !r.label.glyphs);
 
+function pngKey(png: string): string {
+  let hash = 0;
+  for (let i = 0; i < png.length; i += 32) hash = (Math.imul(hash, 31) + png.charCodeAt(i)) >>> 0;
+  return hash.toString(16);
+}
+
 function noteLabel(value: PlacedChar[] | Error, row: LineInk, id: string): RowLabel {
   if (value instanceof Error) return { chars: [], lineNumber: null, glyphs: null };
   const glyphs = segmentNotes(row, value, id);
@@ -124,7 +138,6 @@ export function Studio({ fontId }: { fontId: string }) {
   const [saveError, setSaveError] = useState("");
   const [removed, setRemoved] = useState<Set<string>>(new Set());
   const [excluded, setExcluded] = useState<Set<string>>(new Set());
-  const [mode, setMode] = useState<PageKind>("template");
   const [noteNotice, setNoteNotice] = useState("");
   const [dragging, setDragging] = useState(false);
   const [loadingSample, setLoadingSample] = useState(false);
@@ -134,6 +147,7 @@ export function Studio({ fontId }: { fontId: string }) {
   const excludedRef = useRef(excluded);
   excludedRef.current = excluded;
   const saving = useRef(new Set<string>());
+  const saveGen = useRef(new Map<string, number>());
   const photosRef = useRef(photos);
   photosRef.current = photos;
   const readCache = useRef(new Map<string, Promise<unknown>>());
@@ -161,32 +175,17 @@ export function Studio({ fontId }: { fontId: string }) {
     };
   }, [fontId]);
 
-  const addFiles = useCallback((files: Array<{ blob: Blob; name: string }>, kind: PageKind) => {
+  const addFiles = useCallback((files: Array<{ blob: Blob; name: string }>) => {
     const images = files.filter((f) => f.blob.type.startsWith("image/"));
     if (!images.length) return;
-    let take = images;
-    if (kind === "notes") {
-      const used =
-        libraryRef.current.pages.filter((page) => page.kind === "notes").length +
-        photosRef.current.filter((photo) => photo.kind === "notes").length;
-      const room = NOTES_LIMIT - used;
-      if (room <= 0) {
-        setNoteNotice(`Notes are limited to ${NOTES_LIMIT} pages.`);
-        return;
-      }
-      if (images.length > room) {
-        setNoteNotice(`Added ${room} of ${images.length}. Notes are limited to ${NOTES_LIMIT} pages.`);
-        take = images.slice(0, room);
-      } else setNoteNotice("");
-    }
-    const added: Photo[] = take.map((f) => ({
+    const added: Photo[] = images.map((f) => ({
       id: newId(),
       name: f.name,
       blob: f.blob,
       previewUrl: URL.createObjectURL(f.blob),
       startOverride: null,
       hash: null,
-      kind,
+      kind: null,
     }));
     setPhotos((prev) => [...prev, ...added]);
     for (const photo of added) {
@@ -196,7 +195,7 @@ export function Studio({ fontId }: { fontId: string }) {
     }
   }, []);
 
-  const scanKey = `${libraryReady}|${ai}|${guide.variants}|${photos.map((p) => `${p.id}:${p.kind}:${p.hash ?? "?"}:${p.startOverride ?? "a"}`).join(",")}`;
+  const scanKey = `${libraryReady}|${ai}|${guide.variants}|${photos.map((p) => `${p.id}:${p.hash ?? "?"}:${p.startOverride ?? "a"}`).join(",")}`;
 
   function cachedRead<T>(key: string, task: () => Promise<T>): Promise<T> {
     let pending = readCache.current.get(key) as Promise<T> | undefined;
@@ -219,9 +218,10 @@ export function Studio({ fontId }: { fontId: string }) {
         const png = cropToPng(row);
         thumbs[i] = `data:image/png;base64,${png}`;
         try {
+          const cropKey = `${png.length}:${pngKey(png)}`;
           return kind === "notes"
-            ? await cachedRead(`${idPrefix}:${i}:n`, () => postNotes(png))
-            : await cachedRead(`${idPrefix}:${i}:t`, () => postLine(png, guide.variants));
+            ? await cachedRead(`${idPrefix}:${i}:n:${cropKey}`, () => postNotes(png))
+            : await cachedRead(`${idPrefix}:${i}:t:${cropKey}`, () => postLine(png, guide.variants));
         } catch (e) {
           return e instanceof Error ? e : new Error(String(e));
         } finally {
@@ -262,14 +262,15 @@ export function Studio({ fontId }: { fontId: string }) {
         import("@/lib/scan/scanPage"),
       ]);
       let nextLine = 1;
+      const dropped = new Set(photos.flatMap((photo) => (photo.hash ? [photo.hash] : [])));
+      let notesCount =
+        libraryRef.current.pages.filter((page) => page.kind === "notes" && !dropped.has(page.hash)).length +
+        photos.filter((photo) => photo.kind === "notes").length;
       for (const photo of photos) {
         if (cancelled || run !== runId.current) return;
         if (!photo.hash) continue;
-        const saved = libraryRef.current.pages.find((p) => p.hash === photo.hash);
-        if (saved) {
-          setResults((r) => ({ ...r, [photo.id]: { status: "saved", samples: saved.glyphs.length } }));
-          continue;
-        }
+        saveGen.current.set(photo.hash, (saveGen.current.get(photo.hash) ?? 0) + 1);
+        saving.current.delete(photo.hash);
         const startLine = photo.startOverride ?? nextLine;
         setResults((r) => ({ ...r, [photo.id]: { status: "scanning", startLine } }));
         await frame();
@@ -290,8 +291,25 @@ export function Studio({ fontId }: { fontId: string }) {
           await frame();
           const scan = scanPage(gray, guide, startLine, photo.hash);
           if (cancelled || run !== runId.current) return;
+          const kind: PageKind = looksLikeTemplate(scan) ? "template" : "notes";
+          if (kind === "notes" && photo.kind !== "notes" && notesCount >= NOTES_LIMIT) {
+            setNoteNotice(
+              `Everyday handwriting is limited to ${NOTES_LIMIT} pages. A filled template is faster and has no limit.`,
+            );
+            setResults((r) => ({
+              ...r,
+              [photo.id]: {
+                status: "error",
+                startLine,
+                error: `Everyday handwriting is limited to ${NOTES_LIMIT} pages.`,
+              },
+            }));
+            continue;
+          }
+          if (kind === "notes" && photo.kind !== "notes") notesCount++;
+          setPhotos((prev) => prev.map((item) => (item.id === photo.id ? { ...item, kind } : item)));
           setResults((r) => ({ ...r, [photo.id]: { status: "done", startLine, scan } }));
-          if (ai) void readRows(photo.id, photo.hash, scan.rows, run, photo.kind);
+          if (ai) void readRows(photo.id, photo.hash, scan.rows, run, kind);
           const last = scan.lines.at(-1)?.lineNumber;
           if (last) nextLine = last + 1;
         } catch (e) {
@@ -360,11 +378,18 @@ export function Studio({ fontId }: { fontId: string }) {
   useEffect(() => {
     if (!libraryReady) return;
     let cancelled = false;
-    const saved = new Set(library.pages.map((page) => page.hash));
     const counts = countByChar(library.pages.flatMap((page) => page.glyphs));
     for (const photo of photos) {
-      if (!photo.hash || !sessionGlyphs.finished.has(photo.hash) || saved.has(photo.hash) || saving.current.has(photo.hash)) {
+      if (!photo.hash || !photo.kind || !sessionGlyphs.finished.has(photo.hash) || saving.current.has(photo.hash)) {
         continue;
+      }
+      const previous = library.pages.find((page) => page.hash === photo.hash);
+      if (previous) {
+        for (const glyph of previous.glyphs) {
+          const n = (counts.get(glyph.char) ?? 0) - 1;
+          if (n > 0) counts.set(glyph.char, n);
+          else counts.delete(glyph.char);
+        }
       }
       const glyphs = glyphsToTopUp(
         counts,
@@ -378,6 +403,7 @@ export function Studio({ fontId }: { fontId: string }) {
         savedAt: Date.now(),
         glyphs: glyphs.map(encodeGlyph),
       };
+      const gen = saveGen.current.get(photo.hash) ?? 0;
       saving.current.add(photo.hash);
       void fetch(`/api/fonts/${fontId}/pages/`, {
         method: "PUT",
@@ -386,7 +412,7 @@ export function Studio({ fontId }: { fontId: string }) {
       })
         .then((response) => response.json() as Promise<{ page?: StoredPage; error?: string }>)
         .then((body) => {
-          if (cancelled) return;
+          if (cancelled || saveGen.current.get(photo.hash!) !== gen) return;
           if (!body.page) {
             saving.current.delete(photo.hash!);
             setSaveError(body.error || "Could not save this page.");
@@ -403,6 +429,7 @@ export function Studio({ fontId }: { fontId: string }) {
           }
         })
         .catch(() => {
+          if (saveGen.current.get(photo.hash!) !== gen) return;
           saving.current.delete(photo.hash!);
           if (!cancelled) setSaveError("Could not save this page.");
         });
@@ -458,10 +485,7 @@ export function Studio({ fontId }: { fontId: string }) {
     setLoadingSample(true);
     try {
       const blobs = await Promise.all(SAMPLE_PAGES.map((u) => fetch(u).then((r) => r.blob())));
-      addFiles(
-        blobs.map((blob, i) => ({ blob, name: `Sample page ${i + 1}` })),
-        "template",
-      );
+      addFiles(blobs.map((blob, i) => ({ blob, name: `Sample page ${i + 1}` })));
     } finally {
       setLoadingSample(false);
     }
@@ -470,14 +494,6 @@ export function Studio({ fontId }: { fontId: string }) {
   return (
     <div className="studio">
       <div className="studio-upload">
-        <div className="mode-switch" role="group" aria-label="What you are uploading">
-          <button type="button" className="btn btn-ghost" aria-pressed={mode === "template"} onClick={() => setMode("template")}>
-            Template pages
-          </button>
-          <button type="button" className="btn btn-ghost" aria-pressed={mode === "notes"} onClick={() => setMode("notes")}>
-            Notes, up to {NOTES_LIMIT} pages
-          </button>
-        </div>
         <label
           htmlFor={inputId}
           className={`dropzone${dragging ? " is-dragging" : ""}`}
@@ -489,20 +505,15 @@ export function Studio({ fontId }: { fontId: string }) {
           onDrop={(e) => {
             e.preventDefault();
             setDragging(false);
-            addFiles(
-              [...e.dataTransfer.files].map((f) => ({ blob: f, name: f.name })),
-              mode,
-            );
+            addFiles([...e.dataTransfer.files].map((f) => ({ blob: f, name: f.name })));
           }}
         >
           <span className="dropzone-icon">
             <UploadIcon />
           </span>
-          <span className="dropzone-title">{mode === "notes" ? "Add photos of your notes" : "Add photos of your pages"}</span>
+          <span className="dropzone-title">Add photos of your pages</span>
           <span className="muted small">
-            {mode === "notes"
-              ? "Everyday handwriting works. Each letter is topped up to 3 samples; full cards are left alone."
-              : "Add the lines you still need. Each letter is topped up to 3 samples; full cards are left alone."}
+            Filling in the template is the fastest way to create your font. Each letter is topped up to 3 samples.
           </span>
           <input
             id={inputId}
@@ -511,10 +522,7 @@ export function Studio({ fontId }: { fontId: string }) {
             multiple
             className="visually-hidden"
             onChange={(e) => {
-              addFiles(
-                [...(e.target.files ?? [])].map((f) => ({ blob: f, name: f.name })),
-                mode,
-              );
+              addFiles([...(e.target.files ?? [])].map((f) => ({ blob: f, name: f.name })));
               e.target.value = "";
             }}
           />
@@ -531,6 +539,9 @@ export function Studio({ fontId }: { fontId: string }) {
               AI reading is off, so rows are matched to the guide in order. Set OPENROUTER_API_KEY on the server to turn it on.
             </p>
           )}
+          <p className="muted small">
+            <a href="/#write">Open the template</a>
+          </p>
           <p className="muted small">Letters are saved in this font. The photo itself is not kept.</p>
           {noteNotice && <p className="muted small">{noteNotice}</p>}
           {saveError && <p className="muted small">{saveError}</p>}
@@ -639,7 +650,8 @@ export function Studio({ fontId }: { fontId: string }) {
             <p className="muted">
               Still missing {missing.length === 1 ? "one character" : `${missing.length} characters`}:{" "}
               <code>{missing.join(" ")}</code>. Write guide {linesToWrite.length === 1 ? "line" : "lines"}{" "}
-              {linesToWrite.join(", ")}, or add a photo of your notes. Letters with fewer than 3 samples get topped up.
+              {linesToWrite.join(", ")} on the template and add a photo. Letters with fewer than 3 samples get topped
+              up.
             </p>
           )}
           {!ai && !scanning && okLines.size < guide.lines.length && flagged.size === 0 && (
@@ -770,7 +782,7 @@ function PhotoRow({
         </span>
         {status}
       </div>
-      {!reads && photo.kind !== "notes" && (
+      {!reads && photo.kind === "template" && (
         <div className="field-inline">
           <label htmlFor={selectId}>Starts at line</label>
           <select

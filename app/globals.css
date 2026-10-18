@@ -973,19 +973,6 @@ textarea {
   margin-bottom: 22px;
 }
 
-.mode-switch {
-  grid-column: 1 / -1;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.mode-switch .btn[aria-pressed="true"] {
-  background: var(--brand);
-  color: var(--brand-text);
-  border-color: transparent;
-}
-
 @media (max-width: 800px) {
   .studio-upload {
     grid-template-columns: 1fr;

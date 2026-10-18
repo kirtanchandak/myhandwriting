@@ -73,6 +73,16 @@ const INK_THRESHOLD = 14;
 type Band = { y0: number; y1: number; comps: Component[] };
 type Cluster = { x0: number; x1: number; y0: number; y1: number; comps: Component[]; area: number };
 
+/**
+ * A page follows the writing template when at least half its rows match a
+ * guide line. Empty pages count as the template so they don't use the notes limit.
+ */
+export function looksLikeTemplate(scan: Pick<PageScan, "rows" | "lines">): boolean {
+  if (scan.rows.length === 0) return true;
+  const matched = scan.lines.filter((line) => line.ok).length;
+  return matched > 0 && matched * 2 >= scan.rows.length;
+}
+
 export function scanPage(input: Gray, guide: WritingGuide, startLine = 1, pageId = "p"): PageScan {
   const { width: w, height: h } = input;
   const radius = Math.max(7, Math.round(Math.min(w, h) / 60));

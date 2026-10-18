@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { buildGuide } from "@/lib/template/guide";
 import { buildBank, missingChars } from "@/lib/bank/bank";
 import { rgbaToGray } from "./image";
-import { alignBands, scanPage } from "./scanPage";
+import { alignBands, looksLikeTemplate, scanPage, type PageScan } from "./scanPage";
 
 async function loadGray(path: string) {
   const img = await loadImage(readFileSync(path));
@@ -14,6 +14,26 @@ async function loadGray(path: string) {
   const { data } = ctx.getImageData(0, 0, img.width, img.height);
   return rgbaToGray(data, img.width, img.height);
 }
+
+function page(rows: number, ok: number): Pick<PageScan, "rows" | "lines"> {
+  return {
+    rows: Array.from({ length: rows }, () => ({}) as PageScan["rows"][number]),
+    lines: Array.from({ length: ok }, () => ({ ok: true }) as PageScan["lines"][number]),
+  };
+}
+
+describe("looksLikeTemplate", () => {
+  it("treats a page as the template when most rows match the guide", () => {
+    expect(looksLikeTemplate(page(4, 3))).toBe(true);
+    expect(looksLikeTemplate(page(1, 1))).toBe(true);
+    expect(looksLikeTemplate(page(0, 0))).toBe(true);
+  });
+
+  it("treats a page of ordinary writing as notes", () => {
+    expect(looksLikeTemplate(page(4, 1))).toBe(false);
+    expect(looksLikeTemplate(page(3, 0))).toBe(false);
+  });
+});
 
 describe("alignBands", () => {
   it("matches rows one to one when counts agree", () => {

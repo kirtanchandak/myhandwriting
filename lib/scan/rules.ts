@@ -86,9 +86,9 @@ export function removeRules(mask: Uint8Array, contrast: Uint8Array, w: number, h
       weighted = weight = 0;
     }
   }
-  const ruleYs = rules.map((r) => r.y);
-  const diffs = ruleYs.slice(1).map((y, i) => y - ruleYs[i]).filter((d) => d > 6);
-  const spacing = ruleYs.length >= 3 ? median(diffs) : null;
+  const foundYs = rules.map((r) => r.y);
+  const ruleYs = fillSkippedRules(foundYs, spacingOf(foundYs));
+  const spacing = spacingOf(ruleYs);
   const half = Math.ceil(median(rules.map((r) => r.thickness)) / 2) + 1;
 
   const ruledContrast: number[] = [];
@@ -126,6 +126,9 @@ export function removeRules(mask: Uint8Array, contrast: Uint8Array, w: number, h
       const centre = centres[c0] * (1 - t) + centres[c1] * t;
       const y0 = Math.max(0, Math.round(centre - half));
       const y1 = Math.min(h - 1, Math.round(centre + half));
+      // A pen stroke crossing the line is thicker than the ruling, even when the
+      // pen is the same darkness as the line. Leave that column alone.
+      if (strokeCrosses(ink, w, h, x, y0, y1)) continue;
       for (let y = y0; y <= y1; y++) {
         const i = y * w + x;
         if (contrast[i] <= keepAbove) ink[i] = 0;
@@ -139,6 +142,38 @@ export function removeRules(mask: Uint8Array, contrast: Uint8Array, w: number, h
     clearFaintLines(ink, contrast, w, h, keepAbove, maxThick, Math.round(spacing * 1.25), false);
   }
   return { ink, ruleYs, spacing };
+}
+
+function spacingOf(ys: number[]): number | null {
+  if (ys.length < 3) return null;
+  const diffs = ys.slice(1).map((y, i) => y - ys[i]).filter((d) => d > 6);
+  return diffs.length ? median(diffs) : null;
+}
+
+/**
+ * A ruled line hidden behind handwriting leaves a gap of several line-heights.
+ * Put the missing lines back so the letters still have a baseline to sit on.
+ */
+function fillSkippedRules(ys: number[], spacing: number | null): number[] {
+  if (!spacing) return ys;
+  const out: number[] = [];
+  for (let i = 0; i < ys.length; i++) {
+    out.push(ys[i]);
+    if (i === ys.length - 1) break;
+    const gap = ys[i + 1] - ys[i];
+    const steps = Math.round(gap / spacing);
+    if (steps < 2 || steps > 8 || Math.abs(gap - steps * spacing) > spacing * 0.35) continue;
+    for (let s = 1; s < steps; s++) out.push(ys[i] + (gap * s) / steps);
+  }
+  return out;
+}
+
+/** True when ink at this column runs past the thin ruling, so it is a pen stroke. */
+function strokeCrosses(ink: Uint8Array, w: number, h: number, x: number, y0: number, y1: number): boolean {
+  let extra = 0;
+  for (let y = y0 - 1; y >= 0 && ink[y * w + x]; y--) extra++;
+  for (let y = y1 + 1; y < h && ink[y * w + x]; y++) extra++;
+  return extra >= 2;
 }
 
 /**
