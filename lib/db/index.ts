@@ -62,8 +62,18 @@ export function getDb(): Database.Database {
   db.pragma("journal_mode = WAL");
   db.pragma("foreign_keys = ON");
   db.exec(SCHEMA);
+  migrate(db);
   current = { file, db };
   return db;
+}
+
+function migrate(db: Database.Database) {
+  const names = new Set(
+    (db.prepare("PRAGMA table_info(fonts)").all() as Array<{ name: string }>).map((column) => column.name),
+  );
+  if (!names.has("slug")) db.exec("ALTER TABLE fonts ADD COLUMN slug TEXT");
+  if (!names.has("published")) db.exec("ALTER TABLE fonts ADD COLUMN published INTEGER NOT NULL DEFAULT 0");
+  db.exec("CREATE UNIQUE INDEX IF NOT EXISTS fonts_slug ON fonts(slug)");
 }
 
 /** Closes the open connection. Tests use this before switching files. */

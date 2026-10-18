@@ -973,6 +973,19 @@ textarea {
   margin-bottom: 22px;
 }
 
+.font-actions,
+.publish-font {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.publish-font .form-error {
+  flex-basis: 100%;
+  margin: 0;
+}
+
 @media (max-width: 800px) {
   .studio-upload {
     grid-template-columns: 1fr;
@@ -1587,5 +1600,244 @@ input[type="range"] {
 
   .scribble path {
     stroke-dashoffset: 0;
+  }
+}
+
+.hand {
+  padding-bottom: 72px;
+}
+
+.hand-hero {
+  padding-top: 28px;
+}
+
+.hand-hero h1 {
+  font-family: var(--font-display), serif;
+  font-size: clamp(3rem, 7vw, 5.4rem);
+  line-height: 0.95;
+  font-weight: 560;
+  margin: 8px 0 16px;
+  letter-spacing: -0.03em;
+}
+
+.hand-hero .lede {
+  max-width: 38rem;
+  font-size: 1.15rem;
+}
+
+.hand-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px 32px;
+  list-style: none;
+  padding: 0;
+  margin: 28px 0 0;
+}
+
+.hand-stats li {
+  display: grid;
+  gap: 2px;
+}
+
+.hand-stats strong {
+  font-family: var(--font-display), serif;
+  font-size: 1.8rem;
+  font-weight: 560;
+  line-height: 1;
+}
+
+.hand-stats span {
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.hand-section {
+  margin-top: 56px;
+}
+
+.hand-section-head h2 {
+  font-family: var(--font-display), serif;
+  font-size: 2rem;
+  margin: 0 0 6px;
+}
+
+.hand-section-head p {
+  margin: 0 0 18px;
+  color: var(--muted);
+}
+
+.hand-tester {
+  display: grid;
+  gap: 12px;
+}
+
+.hand-size {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.hand-sheet {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) 1.4fr;
+  gap: 16px;
+  align-items: start;
+}
+
+.hand-sheet textarea {
+  width: 100%;
+  min-height: 180px;
+  resize: vertical;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  color: var(--text);
+  padding: 14px 16px;
+  font: inherit;
+}
+
+.hand-sheet canvas {
+  width: 100%;
+  height: auto;
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+
+.hand-group {
+  margin-top: 22px;
+}
+
+.hand-group h3 {
+  margin: 0 0 10px;
+  font-size: 0.78rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--muted);
+  font-weight: 600;
+}
+
+.view-switch {
+  display: flex;
+  gap: 8px;
+  margin-bottom: 14px;
+}
+
+.view-switch button {
+  border: 1px solid var(--line);
+  background: transparent;
+  color: var(--text);
+  border-radius: 999px;
+  padding: 6px 14px;
+  font: inherit;
+  cursor: pointer;
+}
+
+.view-switch button[aria-pressed="true"] {
+  background: var(--brand);
+  color: var(--brand-text);
+  border-color: transparent;
+}
+
+.pen-board {
+  display: flex;
+  flex-wrap: wrap;
+  width: fit-content;
+  max-width: 100%;
+  background: #12182e;
+  border: 1px solid #2c365c;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.pen-cell {
+  position: relative;
+  width: 56px;
+  height: 72px;
+  border-right: 1px solid #2c365c;
+  border-bottom: 1px solid #2c365c;
+}
+
+.pen-cell img {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%);
+}
+
+.hand-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(148px, 1fr));
+  gap: 10px;
+}
+
+.hand-char {
+  margin: 0;
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 10px 12px 12px;
+  min-height: 92px;
+}
+
+.hand-char figcaption {
+  font-family: var(--font-display), serif;
+  font-size: 1.15rem;
+  margin-bottom: 6px;
+}
+
+.hand-char div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: flex-end;
+  min-height: 48px;
+}
+
+.hand-steps {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: grid;
+  gap: 14px;
+  counter-reset: step;
+}
+
+.hand-steps li {
+  counter-increment: step;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 12px;
+  align-items: baseline;
+}
+
+.hand-steps li::before {
+  content: counter(step);
+  font-family: var(--font-display), serif;
+  font-size: 1.4rem;
+  color: var(--brand);
+}
+
+.hand-css {
+  margin-top: 18px;
+  display: grid;
+  gap: 8px;
+  justify-items: start;
+}
+
+.hand-css pre {
+  width: min(100%, 640px);
+  margin: 0;
+  padding: 16px 18px;
+  overflow: auto;
+  border-radius: var(--radius);
+  background: var(--surface);
+  border: 1px solid var(--line);
+  font-size: 0.86rem;
+}
+
+@media (max-width: 800px) {
+  .hand-sheet {
+    grid-template-columns: 1fr;
   }
 }

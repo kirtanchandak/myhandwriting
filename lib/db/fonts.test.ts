@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { createAccount } from "./accounts";
 import { closeDb } from "./index";
-import { createFont, libraryFor, savePage } from "./fonts";
+import { createFont, libraryFor, publicHand, savePage, setPublished } from "./fonts";
 import type { StoredGlyph } from "@/lib/store/library";
 
 function glyph(id: string, char: string): StoredGlyph {
@@ -92,5 +92,38 @@ describe("font pages", () => {
       glyphs: [glyph("n6:1", "Z")],
     });
     expect(extra).toMatchObject({ error: /5 pages/ });
+  });
+
+  it("publishes at a stable address and hides the page when taken down", () => {
+    const account = createAccount("ada", "longenough");
+    if ("error" in account) throw new Error(account.error);
+    const font = createFont(account.id, "Ada's font");
+    if ("error" in font) throw new Error(font.error);
+    expect(setPublished(account.id, font.id, true)).toEqual({ error: "Add some letters before publishing." });
+
+    const saved = savePage(account.id, font.id, {
+      hash: "page-a",
+      name: "a.jpg",
+      kind: "template",
+      savedAt: 1,
+      glyphs: [glyph("page-a:1", "A")],
+    });
+    if ("error" in saved) throw new Error(saved.error);
+    expect(setPublished(account.id, font.id, true)).toEqual({ slug: "adas-font", published: true });
+    expect(publicHand("adas-font")?.glyphs.map((g) => g.char)).toEqual(["A"]);
+
+    const other = createFont(account.id, "Ada's font");
+    if ("error" in other) throw new Error(other.error);
+    savePage(account.id, other.id, {
+      hash: "page-b",
+      name: "b.jpg",
+      kind: "template",
+      savedAt: 1,
+      glyphs: [glyph("page-b:1", "B")],
+    });
+    expect(setPublished(account.id, other.id, true)).toMatchObject({ slug: "adas-font-2" });
+
+    expect(setPublished(account.id, font.id, false)).toEqual({ slug: "adas-font", published: false });
+    expect(publicHand("adas-font")).toBeNull();
   });
 });

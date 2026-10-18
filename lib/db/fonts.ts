@@ -16,12 +16,19 @@ export type FontSummary = {
   ready: number;
 };
 
-type FontOwner = { id: string; user_id: string; name: string; created_at: number };
+type FontOwner = {
+  id: string;
+  user_id: string;
+  name: string;
+  created_at: number;
+  slug: string | null;
+  published: number;
+};
 
 function owned(userId: string, fontId: string): FontOwner | undefined {
-  return getDb().prepare("SELECT id, user_id, name, created_at FROM fonts WHERE id = ? AND user_id = ?").get(fontId, userId) as
-    | FontOwner
-    | undefined;
+  return getDb()
+    .prepare("SELECT id, user_id, name, created_at, slug, published FROM fonts WHERE id = ? AND user_id = ?")
+    .get(fontId, userId) as FontOwner | undefined;
 }
 
 export function listFonts(userId: string): FontSummary[] {
@@ -51,13 +58,114 @@ export function renameFont(userId: string, fontId: string, name: string): { erro
   return null;
 }
 
+export function slugify(name: string): string {
+  const base = name
+    .normalize("NFKD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/['’]/g, "")
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+  return base || "hand";
+}
+
+export type PublicHand = {
+  name: string;
+  slug: string;
+  glyphs: StoredGlyph[];
+};
+
+/** Publishes the font at `/h/{slug}`, or takes that page down. The address stays the same. */
+export function setPublished(
+  userId: string,
+  fontId: string,
+  published: boolean,
+): { slug: string; published: boolean } | { error: string } {
+  const font = owned(userId, fontId);
+  if (!font) return { error: "Font not found." };
+  const db = getDb();
+  if (!published) {
+    db.prepare("UPDATE fonts SET published = 0 WHERE id = ?").run(fontId);
+    return { slug: font.slug ?? "", published: false };
+  }
+  const samples = db.prepare("SELECT COUNT(*) AS n FROM glyphs WHERE font_id = ? AND excluded = 0").get(fontId) as {
+    n: number;
+  };
+  if (samples.n === 0) return { error: "Add some letters before publishing." };
+  let slug = font.slug;
+  if (!slug) {
+    const base = slugify(font.name);
+    slug = base;
+    for (let n = 2; ; n++) {
+      const taken = db.prepare("SELECT id FROM fonts WHERE slug = ? AND id != ?").get(slug, fontId) as
+        | { id: string }
+        | undefined;
+      if (!taken) break;
+      slug = `${base}-${n}`;
+    }
+  }
+  db.prepare("UPDATE fonts SET slug = ?, published = 1 WHERE id = ?").run(slug, fontId);
+  return { slug, published: true };
+}
+
+export function publicHand(slug: string): PublicHand | null {
+  if (!/^[a-z0-9-]+$/.test(slug)) return null;
+  const font = getDb().prepare("SELECT id, name, slug FROM fonts WHERE slug = ? AND published = 1").get(slug) as
+    | { id: string; name: string; slug: string }
+    | undefined;
+  if (!font) return null;
+  return { name: font.name, slug: font.slug, glyphs: glyphSamples(font.id) };
+}
+
+export function fontSamples(userId: string, fontId: string): { name: string; glyphs: StoredGlyph[] } | null {
+  const font = owned(userId, fontId);
+  if (!font) return null;
+  return { name: font.name, glyphs: glyphSamples(fontId) };
+}
+
+function glyphSamples(fontId: string): StoredGlyph[] {
+  const rows = getDb()
+    .prepare(
+      `SELECT id, ch, variant, line_number, width, height, data, width_u, height_u, top_u
+       FROM glyphs WHERE font_id = ? AND excluded = 0 ORDER BY ch, id`,
+    )
+    .all(fontId) as Array<{
+    id: string;
+    ch: string;
+    variant: number;
+    line_number: number;
+    width: number;
+    height: number;
+    data: Buffer;
+    width_u: number;
+    height_u: number;
+    top_u: number;
+  }>;
+  return rows.map((row) => ({
+    id: row.id,
+    char: row.ch,
+    variant: row.variant,
+    lineNumber: row.line_number,
+    width: row.width,
+    height: row.height,
+    data: Buffer.from(row.data).toString("base64"),
+    widthU: row.width_u,
+    heightU: row.height_u,
+    topU: row.top_u,
+  }));
+}
+
 export function deleteFont(userId: string, fontId: string): boolean {
   if (!owned(userId, fontId)) return false;
   getDb().prepare("DELETE FROM fonts WHERE id = ?").run(fontId);
   return true;
 }
 
-export function libraryFor(userId: string, fontId: string): { name: string; library: Library } | null {
+export function libraryFor(
+  userId: string,
+  fontId: string,
+): { name: string; slug: string | null; published: boolean; library: Library } | null {
   const font = owned(userId, fontId);
   if (!font) return null;
   const pages = getDb()
@@ -103,6 +211,8 @@ export function libraryFor(userId: string, fontId: string): { name: string; libr
   }
   return {
     name: font.name,
+    slug: font.slug,
+    published: font.published === 1,
     library: {
       version: 1,
       excluded,

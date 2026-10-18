@@ -5,6 +5,7 @@ import { currentUser } from "@/lib/auth/session";
 import { libraryFor } from "@/lib/db/fonts";
 import { notFound, redirect } from "next/navigation";
 import { DeleteFont } from "../DeleteFont";
+import { PublishFont } from "../PublishFont";
 import { RenameFont } from "../RenameFont";
 
 export default async function FontPage({ params }: { params: Promise<{ id: string }> }) {
@@ -23,7 +24,15 @@ export default async function FontPage({ params }: { params: Promise<{ id: strin
           </p>
           <div className="font-toolbar">
             <RenameFont id={id} name={found.name} />
-            <DeleteFont id={id} name={found.name} />
+            <div className="font-actions">
+              <PublishFont
+                id={id}
+                published={found.published}
+                slug={found.slug}
+                ready={found.library.pages.some((page) => page.glyphs.some((glyph) => !found.library.excluded.includes(glyph.id)))}
+              />
+              <DeleteFont id={id} name={found.name} />
+            </div>
           </div>
           <GuideProvider>
             <Studio fontId={id} />
