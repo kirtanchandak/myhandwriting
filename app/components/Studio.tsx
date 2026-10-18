@@ -11,11 +11,10 @@ import {
   decodeGlyph,
   encodeGlyph,
   hashBlob,
-  loadLibrary,
-  saveLibrary,
   upsertPage,
   type Library,
   type PageKind,
+  type StoredPage,
 } from "@/lib/store/library";
 import { maskToDataUrl } from "@/lib/render/draw";
 import type { Gray } from "@/lib/scan/image";
@@ -112,7 +111,7 @@ function noteLabel(value: PlacedChar[] | Error, row: LineInk, id: string): RowLa
   return { chars: value.map((p) => p.char), lineNumber: null, glyphs: glyphs.length ? glyphs : null };
 }
 
-export function Studio() {
+export function Studio({ fontId }: { fontId: string }) {
   const { guide } = useGuide();
   const [photos, setPhotos] = useState<Photo[]>([]);
   const [results, setResults] = useState<Record<string, Result>>({});
@@ -121,7 +120,8 @@ export function Studio() {
   const [ai, setAi] = useState<boolean | null>(null);
   const [library, setLibrary] = useState<Library>(EMPTY_LIBRARY);
   const [libraryReady, setLibraryReady] = useState(false);
-  const [storageFull, setStorageFull] = useState(false);
+  const [saveError, setSaveError] = useState("");
+  const [removed, setRemoved] = useState<Set<string>>(new Set());
   const [excluded, setExcluded] = useState<Set<string>>(new Set());
   const [mode, setMode] = useState<PageKind>("template");
   const [noteNotice, setNoteNotice] = useState("");
@@ -130,6 +130,9 @@ export function Studio() {
   const grays = useRef(new Map<string, Gray>());
   const libraryRef = useRef(library);
   libraryRef.current = library;
+  const excludedRef = useRef(excluded);
+  excludedRef.current = excluded;
+  const saving = useRef(new Set<string>());
   const photosRef = useRef(photos);
   photosRef.current = photos;
   const readCache = useRef(new Map<string, Promise<unknown>>());
@@ -137,15 +140,25 @@ export function Studio() {
   const inputId = useId();
 
   useEffect(() => {
-    const saved = loadLibrary();
-    setLibrary(saved);
-    setExcluded(new Set(saved.excluded));
-    setLibraryReady(true);
+    let cancelled = false;
+    fetch(`/api/fonts/${fontId}/`)
+      .then((r) => r.json() as Promise<{ library?: Library }>)
+      .then((body) => {
+        if (cancelled || !body.library) return;
+        setLibrary(body.library);
+        setExcluded(new Set(body.library.excluded));
+      })
+      .finally(() => {
+        if (!cancelled) setLibraryReady(true);
+      });
     fetch("/api/read-line/")
       .then((r) => r.json() as Promise<{ enabled?: boolean }>)
       .then((b) => setAi(b.enabled === true))
       .catch(() => setAi(false));
-  }, []);
+    return () => {
+      cancelled = true;
+    };
+  }, [fontId]);
 
   const addFiles = useCallback((files: Array<{ blob: Blob; name: string }>, kind: PageKind) => {
     const images = files.filter((f) => f.blob.type.startsWith("image/"));
@@ -324,56 +337,74 @@ export function Studio() {
     return { glyphs: out, finished };
   }, [ai, photos, results, reads, lines]);
 
-  const storedGlyphs = useMemo(
-    () =>
-      library.pages
-        .filter((page) => !sessionGlyphs.finished.has(page.hash))
-        .flatMap((page) => page.glyphs.map(decodeGlyph)),
-    [library, sessionGlyphs],
+  const libraryGlyphs = useMemo(
+    () => library.pages.flatMap((page) => page.glyphs.map(decodeGlyph)),
+    [library],
   );
-  const takenChars = useMemo(() => new Set(storedGlyphs.map((g) => g.char)), [storedGlyphs]);
+  const pendingGlyphs = useMemo(() => {
+    const saved = new Set(library.pages.map((page) => page.hash));
+    return sessionGlyphs.glyphs.filter((glyph) => !saved.has(glyph.id.split(":")[0]) && !removed.has(glyph.id));
+  }, [library, sessionGlyphs, removed]);
+  const takenChars = useMemo(() => new Set(libraryGlyphs.map((glyph) => glyph.char)), [libraryGlyphs]);
   const allGlyphs = useMemo(
-    () => [...storedGlyphs, ...glyphsForEmptyCards(takenChars, sessionGlyphs.glyphs)],
-    [storedGlyphs, takenChars, sessionGlyphs],
+    () => [...libraryGlyphs, ...glyphsForEmptyCards(takenChars, pendingGlyphs)].filter((glyph) => !removed.has(glyph.id)),
+    [libraryGlyphs, takenChars, pendingGlyphs, removed],
   );
   const bank = useMemo(() => bankFromGlyphs(allGlyphs, excluded), [allGlyphs, excluded]);
   const allBank = useMemo(() => bankFromGlyphs(allGlyphs), [allGlyphs]);
   useEffect(() => {
     if (!libraryReady) return;
-    const ids = [...excluded];
-    setLibrary((prev) => {
-      let next = prev;
-      if (!(ids.length === next.excluded.length && ids.every((id, i) => id === next.excluded[i]))) {
-        next = { ...next, excluded: ids };
+    let cancelled = false;
+    const saved = new Set(library.pages.map((page) => page.hash));
+    const taken = new Set(library.pages.flatMap((page) => page.glyphs.map((glyph) => glyph.char)));
+    for (const photo of photos) {
+      if (!photo.hash || !sessionGlyphs.finished.has(photo.hash) || saved.has(photo.hash) || saving.current.has(photo.hash)) {
+        continue;
       }
-      for (const photo of photos) {
-        if (!photo.hash || !sessionGlyphs.finished.has(photo.hash)) continue;
-        const taken = new Set(
-          next.pages.filter((page) => !sessionGlyphs.finished.has(page.hash)).flatMap((page) => page.glyphs.map((g) => g.char)),
-        );
-        const glyphs = glyphsForEmptyCards(
-          taken,
-          sessionGlyphs.glyphs.filter((g) => g.id.startsWith(`${photo.hash}:`)),
-        );
-        const existing = next.pages.find((page) => page.hash === photo.hash);
-        const same =
-          existing &&
-          existing.glyphs.length === glyphs.length &&
-          existing.glyphs.every((g, i) => g.id === glyphs[i].id);
-        if (same) continue;
-        next = upsertPage(next, {
-          hash: photo.hash,
-          name: photo.name,
-          savedAt: Date.now(),
-          kind: photo.kind,
-          glyphs: glyphs.map(encodeGlyph),
+      const glyphs = glyphsForEmptyCards(
+        taken,
+        sessionGlyphs.glyphs.filter((glyph) => glyph.id.startsWith(`${photo.hash}:`) && !removed.has(glyph.id)),
+      );
+      const page: StoredPage = {
+        hash: photo.hash,
+        name: photo.name,
+        kind: photo.kind,
+        savedAt: Date.now(),
+        glyphs: glyphs.map(encodeGlyph),
+      };
+      saving.current.add(photo.hash);
+      void fetch(`/api/fonts/${fontId}/pages/`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(page),
+      })
+        .then((response) => response.json() as Promise<{ page?: StoredPage; error?: string }>)
+        .then((body) => {
+          if (cancelled) return;
+          if (!body.page) {
+            saving.current.delete(photo.hash!);
+            setSaveError(body.error || "Could not save this page.");
+            return;
+          }
+          setLibrary((prev) => upsertPage(prev, body.page!));
+          for (const glyph of body.page.glyphs) {
+            if (!excludedRef.current.has(glyph.id)) continue;
+            void fetch(`/api/fonts/${fontId}/glyphs/${encodeURIComponent(glyph.id)}/`, {
+              method: "PATCH",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ excluded: true }),
+            });
+          }
+        })
+        .catch(() => {
+          saving.current.delete(photo.hash!);
+          if (!cancelled) setSaveError("Could not save this page.");
         });
-      }
-      if (next === prev) return prev;
-      if (!saveLibrary(next)) setStorageFull(true);
-      return next;
-    });
-  }, [libraryReady, excluded, photos, sessionGlyphs]);
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [libraryReady, photos, sessionGlyphs, library, fontId, removed]);
 
   const masks = useMemo(() => {
     const m = new Map<string, GlyphMask>();
@@ -494,11 +525,9 @@ export function Studio() {
               AI reading is off, so rows are matched to the guide in order. Set OPENROUTER_API_KEY on the server to turn it on.
             </p>
           )}
-          <p className="muted small">Your letters and the samples you turn off are saved in this browser.</p>
+          <p className="muted small">Letters are saved in this font. The photo itself is not kept.</p>
           {noteNotice && <p className="muted small">{noteNotice}</p>}
-          {storageFull && (
-            <p className="muted small">This browser is full, so the latest page could not be saved.</p>
-          )}
+          {saveError && <p className="muted small">{saveError}</p>}
           <button type="button" className="btn btn-ghost" onClick={loadSamples} disabled={loadingSample}>
             {loadingSample ? "Loading..." : "No pages yet? Try the sample pages"}
           </button>
@@ -617,14 +646,31 @@ export function Studio() {
             bank={allBank}
             charset={guide.charset}
             excluded={excluded}
-            onToggle={(id) =>
+            onToggle={(id) => {
+              const excludedNow = !excluded.has(id);
               setExcluded((prev) => {
                 const next = new Set(prev);
-                if (next.has(id)) next.delete(id);
-                else next.add(id);
+                if (excludedNow) next.add(id);
+                else next.delete(id);
                 return next;
-              })
-            }
+              });
+              void fetch(`/api/fonts/${fontId}/glyphs/${encodeURIComponent(id)}/`, {
+                method: "PATCH",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ excluded: excludedNow }),
+              });
+            }}
+            onDelete={(id) => {
+              setRemoved((prev) => new Set(prev).add(id));
+              setLibrary((prev) => ({
+                ...prev,
+                excluded: prev.excluded.filter((glyphId) => glyphId !== id),
+                pages: prev.pages.map((page) => ({ ...page, glyphs: page.glyphs.filter((glyph) => glyph.id !== id) })),
+              }));
+              if (library.pages.some((page) => page.glyphs.some((glyph) => glyph.id === id))) {
+                void fetch(`/api/fonts/${fontId}/glyphs/${encodeURIComponent(id)}/`, { method: "DELETE" });
+              }
+            }}
           />
         </div>
       )}
@@ -747,11 +793,13 @@ function GlyphSheet({
   charset,
   excluded,
   onToggle,
+  onDelete,
 }: {
   bank: Map<string, ScannedGlyph[]>;
   charset: readonly string[];
   excluded: Set<string>;
   onToggle: (id: string) => void;
+  onDelete: (id: string) => void;
 }) {
   const order = useMemo(() => reviewOrder(charset), [charset]);
   const urls = useMemo(() => {
@@ -767,7 +815,7 @@ function GlyphSheet({
         Review your letters <span className="muted">({total} samples{missing ? `, ${missing} missing` : ""})</span>
       </summary>
       <p className="muted small">
-        Capitals sit next to their small letters. Tap a sample to leave it out of your handwriting. Tap again to bring it back.
+        Capitals sit next to their small letters. Tap a sample to leave it out, or the cross to delete it.
       </p>
       <div className="sheet-grid">
         {order.map((char) => {
@@ -780,24 +828,28 @@ function GlyphSheet({
             ) : (
             <div className="sheet-samples">
               {list.map((g, i) => (
-                <button
-                  key={g.id}
-                  type="button"
-                  className="sample"
-                  aria-pressed={!excluded.has(g.id)}
-                  aria-label={`${char} sample ${i + 1}${excluded.has(g.id) ? ", left out" : ""}`}
-                  onClick={() => onToggle(g.id)}
-                >
-                  {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img
-                    src={urls.get(g.id)}
-                    alt=""
-                    style={{
-                      height: g.metrics.heightU * SHEET_UNIT,
-                      top: (SHEET_ASCENT + g.metrics.topU) * SHEET_UNIT,
-                    }}
-                  />
-                </button>
+                <span key={g.id} className="sample-wrap">
+                  <button
+                    type="button"
+                    className="sample"
+                    aria-pressed={!excluded.has(g.id)}
+                    aria-label={`${char} sample ${i + 1}${excluded.has(g.id) ? ", left out" : ""}`}
+                    onClick={() => onToggle(g.id)}
+                  >
+                    {/* eslint-disable-next-line @next/next/no-img-element */}
+                    <img
+                      src={urls.get(g.id)}
+                      alt=""
+                      style={{
+                        height: g.metrics.heightU * SHEET_UNIT,
+                        top: (SHEET_ASCENT + g.metrics.topU) * SHEET_UNIT,
+                      }}
+                    />
+                  </button>
+                  <button type="button" className="sample-delete" aria-label={`Delete ${char} sample ${i + 1}`} onClick={() => onDelete(g.id)}>
+                    ×
+                  </button>
+                </span>
               ))}
             </div>
             )}

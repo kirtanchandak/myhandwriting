@@ -1,6 +1,7 @@
+import { currentUser } from "@/lib/auth/session";
 import { GuideProvider } from "./components/GuideContext";
 import { ArrowIcon, CameraIcon, LockIcon, PenIcon, TypeIcon } from "./components/Icons";
-import { Studio } from "./components/Studio";
+import { SiteHeader } from "./components/SiteHeader";
 import { WriteGuide } from "./components/WriteGuide";
 
 const STEPS = [
@@ -24,7 +25,7 @@ const STEPS = [
 const FAQ = [
   {
     q: "Are my photos uploaded anywhere?",
-    a: "The photo is processed in your browser and never uploaded. To label your letters, each row is cut out as a black-and-white strip and sent to an AI model, which reads which characters it contains. The strips are not stored.",
+    a: "The photo is processed in your browser and is not stored. Each row is sent to an AI model so the letters can be labelled. The letter samples are saved in your account.",
   },
   {
     q: "Will it look exactly like my writing?",
@@ -40,36 +41,21 @@ const FAQ = [
   },
 ];
 
-export default function Home() {
+export default async function Home() {
+  const user = await currentUser();
   return (
     <GuideProvider>
       <a href="#main" className="skip-link">
         Skip to content
       </a>
-      <header className="site-header">
-        <div className="container header-inner">
-          <a href="#" className="logo" aria-label="myhandwriting home">
-            <span className="logo-mark" aria-hidden="true">
-              <PenIcon />
-            </span>
-            myhandwriting
-          </a>
-          <nav aria-label="Main">
-            <a href="#how">How it works</a>
-            <a href="#write">Write</a>
-            <a href="#studio" className="nav-cta">
-              Upload pages
-            </a>
-          </nav>
-        </div>
-      </header>
+      <SiteHeader user={user} />
 
       <main id="main">
         <section className="hero">
           <div className="container hero-grid">
             <div className="hero-copy">
               <p className="pill">
-                <LockIcon /> Free, no signup, runs on your device
+                <LockIcon /> Free, saved to your account
               </p>
               <h1>
                 Type in your{" "}
@@ -88,8 +74,8 @@ export default function Home() {
                 <a href="#write" className="btn btn-primary btn-lg">
                   Start writing <ArrowIcon />
                 </a>
-                <a href="#studio" className="btn btn-ghost btn-lg">
-                  I have my pages
+                <a href={user ? "/fonts/" : "/signup/"} className="btn btn-ghost btn-lg">
+                  {user ? "Your fonts" : "Create an account"}
                 </a>
               </div>
             </div>
@@ -155,7 +141,23 @@ export default function Home() {
                 Use daylight, lay the page flat and hold the phone straight above it. Fill the frame with the page.
               </p>
             </div>
-            <Studio />
+            {user ? (
+              <p>
+                <a href="/fonts/" className="btn btn-primary">
+                  Open your fonts
+                </a>
+              </p>
+            ) : (
+              <div className="auth-card">
+                <h3>Create an account to save a font</h3>
+                <p className="muted">
+                  Each font, such as Kirtan&apos;s font or Ayush&apos;s font, keeps its own letters. Upload more pages later to fill whatever is still missing.
+                </p>
+                <a href="/signup/" className="btn btn-primary">
+                  Create an account
+                </a>
+              </div>
+            )}
           </div>
         </section>
 
@@ -179,7 +181,7 @@ export default function Home() {
       <footer className="site-footer">
         <div className="container footer-inner">
           <span>myhandwriting</span>
-          <span className="muted">Photos are processed in your browser. Only strips of your rows are read by AI.</span>
+          <span className="muted">Photos are processed in your browser. Letter samples are saved in your account.</span>
         </div>
       </footer>
     </GuideProvider>

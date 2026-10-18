@@ -1,6 +1,6 @@
 import type { ScannedGlyph } from "@/lib/scan/scanPage";
 
-const KEY = "myhandwriting.library";
+export const LIBRARY_KEY = "myhandwriting.library";
 
 export type StoredGlyph = {
   id: string;
@@ -69,7 +69,7 @@ export function upsertPage(lib: Library, page: StoredPage): Library {
 export function loadLibrary(): Library {
   if (typeof localStorage === "undefined") return EMPTY_LIBRARY;
   try {
-    const parsed = JSON.parse(localStorage.getItem(KEY) ?? "") as Partial<Library>;
+    const parsed = JSON.parse(localStorage.getItem(LIBRARY_KEY) ?? "") as Partial<Library>;
     if (parsed.version !== 1 || !Array.isArray(parsed.pages)) return EMPTY_LIBRARY;
     return { version: 1, pages: parsed.pages, excluded: Array.isArray(parsed.excluded) ? parsed.excluded : [] };
   } catch {
@@ -81,7 +81,7 @@ export function loadLibrary(): Library {
 export function saveLibrary(lib: Library): boolean {
   if (typeof localStorage === "undefined") return false;
   try {
-    localStorage.setItem(KEY, JSON.stringify(lib));
+    localStorage.setItem(LIBRARY_KEY, JSON.stringify(lib));
     return true;
   } catch {
     return false;
