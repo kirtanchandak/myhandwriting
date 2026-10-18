@@ -1296,6 +1296,7 @@ textarea {
   border: 1px solid var(--line);
   background: var(--paper);
   padding: 8px 10px 10px;
+  overflow: hidden;
 }
 
 .sheet-cell.is-empty {
@@ -1319,30 +1320,30 @@ textarea {
 
 .sheet-samples {
   display: flex;
+  flex-wrap: wrap;
   gap: 6px;
   align-items: flex-end;
   min-height: 56px;
 }
 
 .sample-wrap {
-  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
   flex: 1;
   min-width: 36px;
+  gap: 4px;
 }
 
 .sample-delete {
-  position: absolute;
-  top: 2px;
-  right: 2px;
-  z-index: 1;
-  width: 22px;
-  height: 22px;
   border: 0;
-  border-radius: 999px;
-  background: var(--surface);
+  padding: 0;
+  background: none;
   color: var(--bad);
   cursor: pointer;
-  line-height: 1;
+  font: inherit;
+  font-size: 0.75rem;
+  text-align: center;
 }
 
 .sample {

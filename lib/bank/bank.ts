@@ -33,9 +33,29 @@ export function bankFromGlyphs(glyphs: readonly ScannedGlyph[], excluded: Readon
   return bank;
 }
 
-/** Keeps samples of characters that have none yet. Characters already collected are dropped. */
-export function glyphsForEmptyCards(taken: ReadonlySet<string>, glyphs: readonly ScannedGlyph[]): ScannedGlyph[] {
-  return glyphs.filter((g) => !taken.has(g.char));
+export const SAMPLES_PER_CHAR = 3;
+
+export function countByChar(glyphs: Iterable<{ char: string }>): Map<string, number> {
+  const counts = new Map<string, number>();
+  for (const glyph of glyphs) counts.set(glyph.char, (counts.get(glyph.char) ?? 0) + 1);
+  return counts;
+}
+
+/** Tops each character up to `limit` samples. Characters that are already full get nothing. */
+export function glyphsToTopUp(
+  existing: ReadonlyMap<string, number>,
+  glyphs: readonly ScannedGlyph[],
+  limit = SAMPLES_PER_CHAR,
+): ScannedGlyph[] {
+  const kept: ScannedGlyph[] = [];
+  const count = new Map(existing);
+  for (const glyph of glyphs) {
+    const n = count.get(glyph.char) ?? 0;
+    if (n >= limit) continue;
+    count.set(glyph.char, n + 1);
+    kept.push(glyph);
+  }
+  return kept;
 }
 
 export function missingChars(bank: GlyphBank, charset: readonly string[]): string[] {

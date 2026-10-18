@@ -4,7 +4,8 @@ import { useCallback, useEffect, useId, useMemo, useRef, useState } from "react"
 import { labelRows, type RowLabel } from "@/lib/ai/label";
 import { segmentNotes, type PlacedChar } from "@/lib/ai/notes";
 import { readingText } from "@/lib/ai/reading";
-import { bankFromGlyphs, buildBank, glyphsForEmptyCards, missingChars } from "@/lib/bank/bank";
+import { bankFromGlyphs, buildBank, countByChar, glyphsToTopUp, missingChars } from "@/lib/bank/bank";
+import { cleanGlyphs } from "@/lib/scan/tidy";
 import { lineText, reviewOrder } from "@/lib/template/guide";
 import {
   EMPTY_LIBRARY,
@@ -338,17 +339,21 @@ export function Studio({ fontId }: { fontId: string }) {
   }, [ai, photos, results, reads, lines]);
 
   const libraryGlyphs = useMemo(
-    () => library.pages.flatMap((page) => page.glyphs.map(decodeGlyph)),
+    () => cleanGlyphs(library.pages.flatMap((page) => page.glyphs.map(decodeGlyph))),
     [library],
   );
   const pendingGlyphs = useMemo(() => {
     const saved = new Set(library.pages.map((page) => page.hash));
-    return sessionGlyphs.glyphs.filter((glyph) => !saved.has(glyph.id.split(":")[0]) && !removed.has(glyph.id));
+    return cleanGlyphs(
+      sessionGlyphs.glyphs.filter((glyph) => !saved.has(glyph.id.split(":")[0]) && !removed.has(glyph.id)),
+    );
   }, [library, sessionGlyphs, removed]);
-  const takenChars = useMemo(() => new Set(libraryGlyphs.map((glyph) => glyph.char)), [libraryGlyphs]);
   const allGlyphs = useMemo(
-    () => [...libraryGlyphs, ...glyphsForEmptyCards(takenChars, pendingGlyphs)].filter((glyph) => !removed.has(glyph.id)),
-    [libraryGlyphs, takenChars, pendingGlyphs, removed],
+    () =>
+      [...libraryGlyphs, ...glyphsToTopUp(countByChar(libraryGlyphs), pendingGlyphs)].filter(
+        (glyph) => !removed.has(glyph.id),
+      ),
+    [libraryGlyphs, pendingGlyphs, removed],
   );
   const bank = useMemo(() => bankFromGlyphs(allGlyphs, excluded), [allGlyphs, excluded]);
   const allBank = useMemo(() => bankFromGlyphs(allGlyphs), [allGlyphs]);
@@ -356,15 +361,16 @@ export function Studio({ fontId }: { fontId: string }) {
     if (!libraryReady) return;
     let cancelled = false;
     const saved = new Set(library.pages.map((page) => page.hash));
-    const taken = new Set(library.pages.flatMap((page) => page.glyphs.map((glyph) => glyph.char)));
+    const counts = countByChar(library.pages.flatMap((page) => page.glyphs));
     for (const photo of photos) {
       if (!photo.hash || !sessionGlyphs.finished.has(photo.hash) || saved.has(photo.hash) || saving.current.has(photo.hash)) {
         continue;
       }
-      const glyphs = glyphsForEmptyCards(
-        taken,
-        sessionGlyphs.glyphs.filter((glyph) => glyph.id.startsWith(`${photo.hash}:`) && !removed.has(glyph.id)),
+      const glyphs = glyphsToTopUp(
+        counts,
+        cleanGlyphs(sessionGlyphs.glyphs.filter((glyph) => glyph.id.startsWith(`${photo.hash}:`) && !removed.has(glyph.id))),
       );
+      for (const glyph of glyphs) counts.set(glyph.char, (counts.get(glyph.char) ?? 0) + 1);
       const page: StoredPage = {
         hash: photo.hash,
         name: photo.name,
@@ -495,8 +501,8 @@ export function Studio({ fontId }: { fontId: string }) {
           <span className="dropzone-title">{mode === "notes" ? "Add photos of your notes" : "Add photos of your pages"}</span>
           <span className="muted small">
             {mode === "notes"
-              ? "Everyday handwriting works. Letters you already have are left alone, and only empty cards are filled."
-              : "Add the lines you still need. Cards that already have a letter are left alone."}
+              ? "Everyday handwriting works. Each letter is topped up to 3 samples; full cards are left alone."
+              : "Add the lines you still need. Each letter is topped up to 3 samples; full cards are left alone."}
           </span>
           <input
             id={inputId}
@@ -633,7 +639,7 @@ export function Studio({ fontId }: { fontId: string }) {
             <p className="muted">
               Still missing {missing.length === 1 ? "one character" : `${missing.length} characters`}:{" "}
               <code>{missing.join(" ")}</code>. Write guide {linesToWrite.length === 1 ? "line" : "lines"}{" "}
-              {linesToWrite.join(", ")}, or add a photo of your notes. Only empty cards get new letters.
+              {linesToWrite.join(", ")}, or add a photo of your notes. Letters with fewer than 3 samples get topped up.
             </p>
           )}
           {!ai && !scanning && okLines.size < guide.lines.length && flagged.size === 0 && (
@@ -815,7 +821,7 @@ function GlyphSheet({
         Review your letters <span className="muted">({total} samples{missing ? `, ${missing} missing` : ""})</span>
       </summary>
       <p className="muted small">
-        Capitals sit next to their small letters. Tap a sample to leave it out, or the cross to delete it.
+        Capitals sit next to their small letters. Tap a sample to leave it out. Tap again to bring it back, or delete it once it is left out.
       </p>
       <div className="sheet-grid">
         {order.map((char) => {
@@ -846,9 +852,11 @@ function GlyphSheet({
                       }}
                     />
                   </button>
-                  <button type="button" className="sample-delete" aria-label={`Delete ${char} sample ${i + 1}`} onClick={() => onDelete(g.id)}>
-                    ×
-                  </button>
+                  {excluded.has(g.id) && (
+                    <button type="button" className="sample-delete" onClick={() => onDelete(g.id)}>
+                      Delete
+                    </button>
+                  )}
                 </span>
               ))}
             </div>

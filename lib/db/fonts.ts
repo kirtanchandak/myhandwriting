@@ -1,7 +1,8 @@
 import { randomUUID } from "node:crypto";
 import { checkFontName } from "@/lib/auth/password";
 import type { Library, PageKind, StoredGlyph, StoredPage } from "@/lib/store/library";
-import { glyphsForEmptyCards } from "@/lib/bank/bank";
+import { glyphsToTopUp } from "@/lib/bank/bank";
+import { cleanGlyphs } from "@/lib/scan/tidy";
 import { decodeGlyph } from "@/lib/store/library";
 import { getDb } from "./index";
 
@@ -117,8 +118,8 @@ export function libraryFor(userId: string, fontId: string): { name: string; libr
 }
 
 /**
- * Stores one processed page. Glyphs for characters this font already has,
- * from any other page, are dropped. Replaces a previous save of the same photo.
+ * Stores one processed page. Each character is topped up to three samples
+ * across the font's other pages. Replaces a previous save of the same photo.
  */
 export function savePage(userId: string, fontId: string, page: StoredPage): StoredPage | { error: string } {
   if (!owned(userId, fontId)) return { error: "Font not found." };
@@ -133,16 +134,17 @@ export function savePage(userId: string, fontId: string, page: StoredPage): Stor
     };
     if (notes.n >= NOTES_LIMIT) return { error: `Notes are limited to ${NOTES_LIMIT} pages.` };
   }
-  const takenRows = db
+  const countRows = db
     .prepare(
-      `SELECT DISTINCT glyphs.ch AS ch FROM glyphs
+      `SELECT glyphs.ch AS ch, COUNT(*) AS n FROM glyphs
        JOIN pages ON pages.id = glyphs.page_id
-       WHERE glyphs.font_id = ? AND pages.hash != ?`,
+       WHERE glyphs.font_id = ? AND pages.hash != ?
+       GROUP BY glyphs.ch`,
     )
-    .all(fontId, page.hash) as Array<{ ch: string }>;
-  const kept = glyphsForEmptyCards(
-    new Set(takenRows.map((row) => row.ch)),
-    page.glyphs.map(decodeGlyph),
+    .all(fontId, page.hash) as Array<{ ch: string; n: number }>;
+  const kept = glyphsToTopUp(
+    new Map(countRows.map((row) => [row.ch, row.n])),
+    cleanGlyphs(page.glyphs.map(decodeGlyph)),
   );
   const stored: StoredPage = {
     hash: page.hash,

@@ -1,4 +1,5 @@
 import type { LineInk, ScannedGlyph } from "@/lib/scan/scanPage";
+import { tidyGlyph } from "@/lib/scan/tidy";
 import { glyphFromRange, type Range } from "./segment";
 
 export type PlacedChar = { char: string; /** Horizontal center, 0 to 1. */ x: number };
@@ -44,7 +45,7 @@ export function segmentNotes(crop: LineInk, placed: readonly PlacedChar[], idPre
     if (!range) return;
     const variant = seen.get(p.char) ?? 0;
     seen.set(p.char, variant + 1);
-    glyphs.push(glyphFromRange(crop, range, { char: p.char, variant }, 0, `${idPrefix}:n${glyphs.length}`));
+    glyphs.push(tidyGlyph(glyphFromRange(crop, range, { char: p.char, variant }, 0, `${idPrefix}:n${glyphs.length}`)));
   });
   return glyphs;
 }

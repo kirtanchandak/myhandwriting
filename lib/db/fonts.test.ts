@@ -29,7 +29,7 @@ describe("font pages", () => {
   });
   afterEach(() => closeDb());
 
-  it("keeps a new character and drops one the font already has", () => {
+  it("tops characters up to three samples across pages", () => {
     const account = createAccount("ada", "longenough");
     if ("error" in account) throw new Error(account.error);
     const font = createFont(account.id, "Ada's font");
@@ -40,24 +40,32 @@ describe("font pages", () => {
       name: "a.jpg",
       kind: "template",
       savedAt: 1,
-      glyphs: [glyph("page-a:1", "A"), glyph("page-a:2", "B")],
+      glyphs: [glyph("page-a:1", "A"), glyph("page-a:2", "B"), glyph("page-a:3", "B"), glyph("page-a:4", "B")],
     });
     if ("error" in first) throw new Error(first.error);
-    expect(first.glyphs.map((g) => g.char)).toEqual(["A", "B"]);
+    expect(first.glyphs.map((g) => g.char)).toEqual(["A", "B", "B", "B"]);
 
     const second = savePage(account.id, font.id, {
       hash: "page-b",
       name: "b.jpg",
       kind: "notes",
       savedAt: 2,
-      glyphs: [glyph("page-b:1", "A"), glyph("page-b:2", "C")],
+      glyphs: [
+        glyph("page-b:1", "A"),
+        glyph("page-b:2", "A"),
+        glyph("page-b:3", "A"),
+        glyph("page-b:4", "B"),
+        glyph("page-b:5", "C"),
+      ],
     });
     if ("error" in second) throw new Error(second.error);
-    expect(second.glyphs.map((g) => g.char)).toEqual(["C"]);
+    expect(second.glyphs.map((g) => g.char)).toEqual(["A", "A", "C"]);
 
     const loaded = libraryFor(account.id, font.id);
     expect(loaded?.library.pages).toHaveLength(2);
-    expect(loaded?.library.pages.flatMap((p) => p.glyphs.map((g) => g.char)).sort()).toEqual(["A", "B", "C"]);
+    expect(loaded?.library.pages.flatMap((p) => p.glyphs.map((g) => g.char)).sort()).toEqual([
+      "A", "A", "A", "B", "B", "B", "C",
+    ]);
     expect(savePage("someone-else", font.id, first)).toEqual({ error: "Font not found." });
   });
 

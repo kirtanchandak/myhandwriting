@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { LineInk, ScannedGlyph } from "@/lib/scan/scanPage";
-import { glyphsForEmptyCards } from "@/lib/bank/bank";
+import { glyphsToTopUp } from "@/lib/bank/bank";
 import { parseNoteReading, segmentNotes } from "./notes";
 
 function cropWith(blobs: Array<[number, number]>): LineInk {
@@ -47,7 +47,7 @@ describe("segmentNotes", () => {
   });
 });
 
-describe("glyphsForEmptyCards", () => {
+describe("glyphsToTopUp", () => {
   const glyph = (char: string): ScannedGlyph => ({
     id: char,
     char,
@@ -57,8 +57,12 @@ describe("glyphsForEmptyCards", () => {
     metrics: { widthU: 1, heightU: 1, topU: 0 },
   });
 
-  it("keeps every sample of a new character and drops ones already collected", () => {
-    const kept = glyphsForEmptyCards(new Set(["A"]), [glyph("A"), glyph("B"), glyph("B")]);
-    expect(kept.map((g) => g.char)).toEqual(["B", "B"]);
+  it("tops each character up to three samples", () => {
+    const existing = new Map([
+      ["A", 1],
+      ["B", 3],
+    ]);
+    const found = [glyph("A"), glyph("A"), glyph("A"), glyph("B"), glyph("C"), glyph("C"), glyph("C"), glyph("C")];
+    expect(glyphsToTopUp(existing, found).map((g) => g.char)).toEqual(["A", "A", "C", "C", "C"]);
   });
 });
