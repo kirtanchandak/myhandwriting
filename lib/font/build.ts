@@ -1,9 +1,12 @@
 import { Font, Glyph, Path } from "opentype.js";
+import { addTable, kernTable, type KernPair } from "./kern";
 import { traceContours } from "./trace";
 
 /** One rule-spacing of the notebook becomes this many font units. */
 const UNIT = 1000;
 const SIDE = 40;
+/** Kerning smaller than this, in font units, is not worth a pair. */
+const MIN_KERN = 8;
 
 export type FontSample = {
   char: string;
@@ -13,6 +16,15 @@ export type FontSample = {
   widthU: number;
   heightU: number;
   topU: number;
+  /** Margin on each side of the ink, in rule units. */
+  sideU?: number;
+};
+
+export type FontSpacing = {
+  /** Width of a space, in rule units. */
+  wordSpacing?: number;
+  /** Extra space between two characters, in rule units. */
+  kern?: (left: FontSample, right: FontSample) => number;
 };
 
 export function postScriptName(family: string): string {
@@ -21,12 +33,13 @@ export function postScriptName(family: string): string {
 }
 
 /** One outline per character, plus a space. The first sample of a character is the one that ships. */
-export function buildHandFont(familyName: string, samples: readonly FontSample[]): ArrayBuffer {
+export function buildHandFont(familyName: string, samples: readonly FontSample[], spacing: FontSpacing = {}): ArrayBuffer {
   const family = familyName.trim().slice(0, 60) || "Hand";
   const glyphs: Glyph[] = [
     new Glyph({ name: ".notdef", advanceWidth: 500, path: new Path() }),
-    new Glyph({ name: "space", unicode: 32, advanceWidth: Math.round(UNIT * 0.32), path: new Path() }),
+    new Glyph({ name: "space", unicode: 32, advanceWidth: Math.round(UNIT * (spacing.wordSpacing ?? 0.32)), path: new Path() }),
   ];
+  const shipped: Array<{ sample: FontSample; index: number }> = [];
   const seen = new Set<string>();
   for (const sample of samples) {
     if (seen.has(sample.char) || [...sample.char].length !== 1) continue;
@@ -35,11 +48,12 @@ export function buildHandFont(familyName: string, samples: readonly FontSample[]
     const path = outline(sample);
     if (!path.commands.length) continue;
     seen.add(sample.char);
+    shipped.push({ sample, index: glyphs.length });
     glyphs.push(
       new Glyph({
         name: glyphName(sample.char, code),
         unicode: code,
-        advanceWidth: Math.round(sample.widthU * UNIT + SIDE * 2),
+        advanceWidth: Math.round(sample.widthU * UNIT + sideOf(sample) * 2),
         path,
       }),
     );
@@ -56,7 +70,20 @@ export function buildHandFont(familyName: string, samples: readonly FontSample[]
     descender: -500,
     glyphs,
   });
-  return font.toArrayBuffer();
+  const file = font.toArrayBuffer();
+  if (!spacing.kern) return file;
+  const pairs: KernPair[] = [];
+  for (const a of shipped) {
+    for (const b of shipped) {
+      const value = Math.round(spacing.kern(a.sample, b.sample) * UNIT);
+      if (Math.abs(value) >= MIN_KERN) pairs.push({ left: a.index, right: b.index, value });
+    }
+  }
+  return pairs.length ? addTable(file, "kern", kernTable(pairs)) : file;
+}
+
+function sideOf(sample: FontSample): number {
+  return sample.sideU === undefined ? SIDE : sample.sideU * UNIT;
 }
 
 function glyphName(char: string, code: number): string {
@@ -79,7 +106,7 @@ function outline(sample: FontSample): Path {
 }
 
 function toFont(sample: FontSample, x: number, y: number): [number, number] {
-  const fx = SIDE + (x / sample.width) * sample.widthU * UNIT;
+  const fx = sideOf(sample) + (x / sample.width) * sample.widthU * UNIT;
   const fy = -((sample.topU + (y / sample.height) * sample.heightU) * UNIT);
   return [Math.round(fx), Math.round(fy)];
 }

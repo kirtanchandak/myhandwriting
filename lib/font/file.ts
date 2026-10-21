@@ -1,26 +1,32 @@
+import { repairFont } from "@/lib/repair";
+import type { ScannedGlyph } from "@/lib/scan/scanPage";
 import { decodeGlyph, type StoredGlyph } from "@/lib/store/library";
 import { buildHandFont, postScriptName, type FontSample } from "./build";
-import { penGlyph } from "./pen";
 
-/** Traces the first sample of each character into a TrueType font. */
+/** Repairs the samples, then traces the most typical one of each character into a font. */
 export function samplesToFont(name: string, glyphs: readonly StoredGlyph[]): ArrayBuffer {
-  const samples: FontSample[] = [];
-  const seen = new Set<string>();
-  for (const stored of glyphs) {
-    if (seen.has(stored.char)) continue;
-    seen.add(stored.char);
-    const glyph = penGlyph(decodeGlyph(stored));
-    samples.push({
-      char: stored.char,
-      width: glyph.mask.width,
-      height: glyph.mask.height,
-      data: glyph.mask.data,
-      widthU: glyph.metrics.widthU,
-      heightU: glyph.metrics.heightU,
-      topU: glyph.metrics.topU,
-    });
+  const font = repairFont(glyphs.map(decodeGlyph));
+  const source = new Map<FontSample, ScannedGlyph>();
+  for (const list of font.bank.values()) {
+    const glyph = list[0];
+    source.set(
+      {
+        char: glyph.char,
+        width: glyph.mask.width,
+        height: glyph.mask.height,
+        data: glyph.mask.data,
+        widthU: glyph.metrics.widthU,
+        heightU: glyph.metrics.heightU,
+        topU: glyph.metrics.topU,
+        sideU: glyph.metrics.sideU,
+      },
+      glyph,
+    );
   }
-  return buildHandFont(name, samples);
+  return buildHandFont(name, [...source.keys()], {
+    wordSpacing: font.layout.wordSpacing,
+    kern: (a, b) => font.layout.kern(source.get(a)!, source.get(b)!),
+  });
 }
 
 export function fontFileResponse(name: string, glyphs: readonly StoredGlyph[], download: boolean): Response {

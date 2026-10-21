@@ -11,12 +11,16 @@ export type LayoutOptions = {
   /** Line pitch in rule units. */
   lineHeight: number;
   padding: number;
-  /** Extra space after each glyph, in rule units. */
+  /** Extra space after each glyph, in rule units. Glyphs with side bearings use those instead. */
   letterSpacing: number;
   wordSpacing: number;
   /** 0 = rigid, 1 = natural, 2 = messy. */
   wobble: number;
   seed: number;
+  /** Height of a lowercase x, in rule units. Bounds the baseline wobble. */
+  xHeight?: number;
+  /** Extra space between two neighbouring glyphs, in rule units. */
+  kern?: (left: RenderGlyph, right: RenderGlyph) => number;
 };
 
 export const DEFAULT_LAYOUT: Omit<LayoutOptions, "width"> = {
@@ -87,7 +91,7 @@ function resolve(bank: RenderBank, ch: string): readonly RenderGlyph[] | undefin
   return swapped !== ch ? bank.get(swapped) : undefined;
 }
 
-type Item = { glyph: RenderGlyph; advance: number; dy: number; scale: number; rotation: number };
+type Item = { glyph: RenderGlyph; lead: number; advance: number; dy: number; scale: number; rotation: number };
 
 export function layoutText(text: string, bank: RenderBank, options: LayoutOptions): TextLayout {
   const o = options;
@@ -97,8 +101,9 @@ export function layoutText(text: string, bank: RenderBank, options: LayoutOption
   const missing = new Set<string>();
   const normalized = [...text].map((c) => NORMALIZE[c] ?? c).join("").replace(/\r\n?/g, "\n");
 
-  const toItems = (word: string): Item[] =>
-    [...word].flatMap((ch) => {
+  const xHeight = o.xHeight ?? 0.5;
+  const toItems = (word: string): Item[] => {
+    const items = [...word].flatMap((ch): Item[] => {
       const samples = resolve(bank, ch);
       if (!samples) {
         missing.add(ch);
@@ -109,16 +114,24 @@ export function layoutText(text: string, bank: RenderBank, options: LayoutOption
       history.set(ch, [...h, pick].slice(-2));
       const glyph = samples[pick];
       const scale = 1 + jitter(0.03);
+      const side = glyph.metrics.sideU;
+      const gap = (side === undefined ? o.letterSpacing : side * 2) * (1 + jitter(0.3));
       return [
         {
           glyph,
-          advance: (glyph.metrics.widthU * scale + o.letterSpacing * (1 + jitter(0.3))) * o.size,
-          dy: jitter(0.012) * o.size,
+          lead: side === undefined ? 0 : gap / 2,
+          advance: (glyph.metrics.widthU * scale + gap) * o.size,
+          dy: jitter(0.02 * xHeight) * o.size,
           scale,
           rotation: (jitter(1.2) * Math.PI) / 180,
         },
       ];
     });
+    if (o.kern) {
+      for (let i = 1; i < items.length; i++) items[i - 1].advance += o.kern(items[i - 1].glyph, items[i].glyph) * o.size;
+    }
+    return items;
+  };
 
   const maxX = o.width - o.padding;
   const pitch = o.lineHeight * o.size;
@@ -148,10 +161,11 @@ export function layoutText(text: string, bank: RenderBank, options: LayoutOption
       if (x + wordWidth > maxX && x > o.padding) newLine();
       for (const it of items) {
         const gw = it.glyph.metrics.widthU * o.size * it.scale;
-        if (x + gw > maxX && x > o.padding) newLine();
+        const lead = it.lead * o.size;
+        if (x + lead + gw > maxX && x > o.padding) newLine();
         placed.push({
           glyph: it.glyph,
-          x,
+          x: x + lead,
           y: baseline + it.glyph.metrics.topU * o.size * it.scale + it.dy,
           w: gw,
           h: it.glyph.metrics.heightU * o.size * it.scale,

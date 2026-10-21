@@ -1773,7 +1773,8 @@ input[type="range"] {
 
 .hand-char {
   margin: 0;
-  background: var(--surface);
+  background: var(--paper);
+  color: #1b1d2a;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 10px 12px 12px;
@@ -1784,6 +1785,7 @@ input[type="range"] {
   font-family: var(--font-display), serif;
   font-size: 1.15rem;
   margin-bottom: 6px;
+  color: #676571;
 }
 
 .hand-char div {
@@ -1799,23 +1801,31 @@ input[type="range"] {
   padding: 0;
   list-style: none;
   display: grid;
-  gap: 14px;
+  gap: 20px;
+  max-width: 640px;
   counter-reset: step;
 }
 
 .hand-steps li {
-  counter-increment: step;
   display: grid;
-  grid-template-columns: auto 1fr;
-  gap: 12px;
+  grid-template-columns: 2rem 1fr;
+  column-gap: 12px;
+  row-gap: 2px;
   align-items: baseline;
 }
 
 .hand-steps li::before {
   content: counter(step);
+  counter-increment: step;
+  grid-row: 1 / span 2;
   font-family: var(--font-display), serif;
   font-size: 1.4rem;
+  line-height: 1.2;
   color: var(--brand);
+}
+
+.hand-steps span {
+  color: var(--muted);
 }
 
 .hand-css {

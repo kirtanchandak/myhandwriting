@@ -5,6 +5,7 @@ import { labelRows, type RowLabel } from "@/lib/ai/label";
 import { segmentNotes, type PlacedChar } from "@/lib/ai/notes";
 import { readingText } from "@/lib/ai/reading";
 import { bankFromGlyphs, buildBank, countByChar, glyphsToTopUp, missingChars } from "@/lib/bank/bank";
+import { repairFont } from "@/lib/repair";
 import { cleanGlyphs } from "@/lib/scan/tidy";
 import { lineText, reviewOrder } from "@/lib/template/guide";
 import {
@@ -21,7 +22,6 @@ import { maskToDataUrl } from "@/lib/render/draw";
 import type { Gray } from "@/lib/scan/image";
 import {
   looksLikeTemplate,
-  type GlyphMask,
   type LineInk,
   type PageScan,
   type ScannedGlyph,
@@ -375,6 +375,10 @@ export function Studio({ fontId }: { fontId: string }) {
   );
   const bank = useMemo(() => bankFromGlyphs(allGlyphs, excluded), [allGlyphs, excluded]);
   const allBank = useMemo(() => bankFromGlyphs(allGlyphs), [allGlyphs]);
+  const repaired = useMemo(
+    () => repairFont(allGlyphs.filter((glyph) => !excluded.has(glyph.id))),
+    [allGlyphs, excluded],
+  );
   useEffect(() => {
     if (!libraryReady) return;
     let cancelled = false;
@@ -438,12 +442,6 @@ export function Studio({ fontId }: { fontId: string }) {
       cancelled = true;
     };
   }, [libraryReady, photos, sessionGlyphs, library, fontId, removed]);
-
-  const masks = useMemo(() => {
-    const m = new Map<string, GlyphMask>();
-    for (const list of allBank.values()) for (const g of list) m.set(g.id, g.mask);
-    return m;
-  }, [allBank]);
 
   const okLines = new Set<number>();
   for (const page of lines) for (const l of page) if (l.ok) okLines.add(l.lineNumber);
@@ -693,7 +691,7 @@ export function Studio({ fontId }: { fontId: string }) {
         </div>
       )}
 
-      <Playground bank={bank} masks={masks} missing={missing} ready={bank.size > 0} />
+      <Playground font={repaired} missing={missing} ready={bank.size > 0} />
     </div>
   );
 }

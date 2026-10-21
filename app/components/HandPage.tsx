@@ -1,29 +1,19 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { bankFromGlyphs } from "@/lib/bank/bank";
+import { repairFont, type RepairedFont } from "@/lib/repair";
 import { drawLayout, maskToDataUrl } from "@/lib/render/draw";
 import { DEFAULT_LAYOUT, layoutText } from "@/lib/render/layout";
 import type { GlyphMask, ScannedGlyph } from "@/lib/scan/scanPage";
 import { decodeGlyph, type StoredGlyph } from "@/lib/store/library";
-import { penGlyph } from "@/lib/font/pen";
 import { GROUPS } from "@/lib/template/guide";
 
 const INK = "#1d2b64";
-const PEN_INK = "#c5d4ff";
-const PEN_UNIT = 46;
-const PEN_ASCENT = 0.78;
-
-type LetterView = "samples" | "pen";
 
 export function HandPage({ name, slug, glyphs }: { name: string; slug: string; glyphs: StoredGlyph[] }) {
-  const [view, setView] = useState<LetterView>("pen");
   const decoded = useMemo(() => glyphs.map(decodeGlyph), [glyphs]);
-  const penned = useMemo(() => decoded.map(penGlyph), [decoded]);
-  const bank = useMemo(() => bankFromGlyphs(decoded), [decoded]);
-  const penBank = useMemo(() => bankFromGlyphs(penned), [penned]);
-  const masks = useMemo(() => maskMap(decoded), [decoded]);
-  const penMasks = useMemo(() => maskMap(penned), [penned]);
+  const font = useMemo(() => repairFont(decoded), [decoded]);
+  const { bank, masks } = font;
   const samples = decoded.length;
   const characters = bank.size;
   const variants = [...bank.values()].reduce((max, list) => Math.max(max, list.length), 0);
@@ -60,39 +50,26 @@ export function HandPage({ name, slug, glyphs }: { name: string; slug: string; g
           <h2 id="write-title">Write something</h2>
           <p>Click the sheet and type. Letters change between samples as you go.</p>
         </div>
-        <ViewSwitch view={view} onChange={setView} />
-        <TypeSheet name={name} bank={view === "pen" ? penBank : bank} masks={view === "pen" ? penMasks : masks} />
-        <p className="muted small">
-          Your text stays in this browser. Samples are the ink from the page. Pen redraws each letter with one steady
-          stroke, which is also the downloaded font.
-        </p>
+        <TypeSheet name={name} font={font} />
+        <p className="muted small">Your text stays in this browser. Letters are your own ink, lined up and spaced.</p>
       </section>
 
       <section className="container hand-section" aria-labelledby="chars-title">
         <div className="hand-section-head">
           <h2 id="chars-title">Every character</h2>
-          <p>
-            {view === "pen"
-              ? "Each letter, redrawn with one nib."
-              : "Up to three samples of each letter, taken from the pages that were uploaded."}
-          </p>
+          <p>Up to three samples of each letter, trimmed to the ink and set on one baseline.</p>
         </div>
-        <ViewSwitch view={view} onChange={setView} />
         {GROUPS.map((group) => {
           const chars = group.chars.filter((char) => bank.get(char)?.length);
           if (!chars.length) return null;
           return (
             <div key={group.id} className="hand-group">
               <h3>{group.title}</h3>
-              {view === "pen" ? (
-                <PenBoard chars={chars} glyphs={chars.map((char) => penBank.get(char)?.[0]).filter((glyph) => glyph !== undefined)} masks={penMasks} />
-              ) : (
-                <div className="hand-grid">
-                  {chars.map((char) => (
-                    <CharSamples key={char} char={char} glyphs={bank.get(char) ?? []} masks={masks} />
-                  ))}
-                </div>
-              )}
+              <div className="hand-grid">
+                {chars.map((char) => (
+                  <CharSamples key={char} char={char} glyphs={bank.get(char) ?? []} masks={masks} />
+                ))}
+              </div>
             </div>
           );
         })}
@@ -104,16 +81,20 @@ export function HandPage({ name, slug, glyphs }: { name: string; slug: string; g
         </div>
         <ol className="hand-steps">
           <li>
-            <strong>Separate the ink.</strong> The pen is lifted off the paper, and the ruled lines come away.
+            <strong>Separate the ink</strong>
+            <span>The pen is lifted off the paper, and the ruled lines come away.</span>
           </li>
           <li>
-            <strong>Find the letters.</strong> Each row is read, then cut into one sample per character.
+            <strong>Find the letters</strong>
+            <span>Each row is read, then cut into one sample per character.</span>
           </li>
           <li>
-            <strong>Keep three of each.</strong> Later pages fill in what is missing and top a letter up to three samples.
+            <strong>Keep three of each</strong>
+            <span>Later pages fill in what is missing and top a letter up to three samples.</span>
           </li>
           <li>
-            <strong>Redraw with one pen.</strong> Each letter is thinned to its centre and filled back in with a steady stroke. That is the font file.
+            <strong>Line them up</strong>
+            <span>Each sample is trimmed to its ink, set on one baseline at one size, and spaced by its shape. That is the font file.</span>
           </li>
         </ol>
       </section>
@@ -134,81 +115,13 @@ export function HandPage({ name, slug, glyphs }: { name: string; slug: string; g
   );
 }
 
-function maskMap(glyphs: ScannedGlyph[]): Map<string, GlyphMask> {
-  const map = new Map<string, GlyphMask>();
-  for (const glyph of glyphs) map.set(glyph.id, glyph.mask);
-  return map;
-}
-
-function ViewSwitch({ view, onChange }: { view: LetterView; onChange: (view: LetterView) => void }) {
-  return (
-    <div className="view-switch" role="group" aria-label="How letters are drawn">
-      <button type="button" aria-pressed={view === "samples"} onClick={() => onChange("samples")}>
-        Samples
-      </button>
-      <button type="button" aria-pressed={view === "pen"} onClick={() => onChange("pen")}>
-        Pen
-      </button>
-    </div>
-  );
-}
-
-function PenBoard({
-  chars,
-  glyphs,
-  masks,
-}: {
-  chars: string[];
-  glyphs: ScannedGlyph[];
-  masks: Map<string, GlyphMask>;
-}) {
-  const byChar = new Map(glyphs.map((glyph) => [glyph.char, glyph]));
-  return (
-    <div className="pen-board">
-      {chars.map((char) => {
-        const glyph = byChar.get(char);
-        return glyph ? <PenCell key={char} glyph={glyph} mask={masks.get(glyph.id)} /> : null;
-      })}
-    </div>
-  );
-}
-
-function PenCell({ glyph, mask }: { glyph: ScannedGlyph; mask?: GlyphMask }) {
-  const [url, setUrl] = useState("");
-  useEffect(() => {
-    setUrl(mask ? maskToDataUrl(mask, PEN_INK) : "");
-  }, [mask]);
-  return (
-    <div className="pen-cell">
-      {url && (
-        // eslint-disable-next-line @next/next/no-img-element
-        <img
-          src={url}
-          alt={glyph.char}
-          style={{
-            height: glyph.metrics.heightU * PEN_UNIT,
-            top: (PEN_ASCENT + glyph.metrics.topU) * PEN_UNIT,
-          }}
-        />
-      )}
-    </div>
-  );
-}
-
-function TypeSheet({
-  name,
-  bank,
-  masks,
-}: {
-  name: string;
-  bank: ReturnType<typeof bankFromGlyphs>;
-  masks: Map<string, GlyphMask>;
-}) {
+function TypeSheet({ name, font }: { name: string; font: RepairedFont }) {
   const [text, setText] = useState(`Hello, this is ${name}.`);
   const [size, setSize] = useState(64);
+  const { bank, masks } = font;
   const layout = useMemo(
-    () => layoutText(text, bank, { ...DEFAULT_LAYOUT, width: 880, size, wobble: 0.6, seed: 3 }),
-    [text, bank, size],
+    () => layoutText(text, bank, { ...DEFAULT_LAYOUT, ...font.layout, width: 880, size, wobble: 0.6, seed: 3 }),
+    [text, bank, font.layout, size],
   );
   const [canvas, setCanvas] = useState<HTMLCanvasElement | null>(null);
   useEffect(() => {

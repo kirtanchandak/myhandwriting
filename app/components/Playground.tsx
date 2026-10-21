@@ -1,10 +1,9 @@
 "use client";
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import type { GlyphBank } from "@/lib/bank/bank";
+import type { RepairedFont } from "@/lib/repair";
 import { drawLayout, layoutToSvg, type Paper } from "@/lib/render/draw";
 import { DEFAULT_LAYOUT, layoutText } from "@/lib/render/layout";
-import type { GlyphMask } from "@/lib/scan/scanPage";
 import { DownloadIcon, ShuffleIcon } from "./Icons";
 
 const INKS = [
@@ -30,17 +29,8 @@ function download(data: BlobPart, type: string, filename: string) {
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
-export function Playground({
-  bank,
-  masks,
-  missing,
-  ready,
-}: {
-  bank: GlyphBank;
-  masks: ReadonlyMap<string, GlyphMask>;
-  missing: string[];
-  ready: boolean;
-}) {
+export function Playground({ font, missing, ready }: { font: RepairedFont; missing: string[]; ready: boolean }) {
+  const { bank, masks } = font;
   const [text, setText] = useState(SAMPLE_TEXT);
   const [ink, setInk] = useState(INKS[0].value);
   const [paper, setPaper] = useState<Paper>("ruled");
@@ -68,13 +58,14 @@ export function Playground({
     () =>
       layoutText(text, bank, {
         ...DEFAULT_LAYOUT,
+        ...font.layout,
         width: outputWidth,
         size,
         lineHeight,
         wobble,
         seed,
       }),
-    [text, bank, size, lineHeight, wobble, seed, outputWidth],
+    [text, bank, font.layout, size, lineHeight, wobble, seed, outputWidth],
   );
 
   useEffect(() => {
@@ -94,10 +85,7 @@ export function Playground({
   return (
     <div className={`playground${ready ? "" : " is-locked"}`} id="type">
       <div className="pg-head">
-        <div>
-          <span className="eyebrow">Step 3</span>
-          <h3>Type anything in your handwriting</h3>
-        </div>
+        <h3>Type anything in your handwriting</h3>
         {ready && (
           <div className="pg-actions">
             <button type="button" className="btn btn-ghost" onClick={() => setSeed((s) => s + 1)}>

@@ -37,7 +37,7 @@ const FAQ = [
   },
   {
     q: "Can I install it as a font?",
-    a: "Not yet. Today you can download PNG and SVG images. An installable font file is on the roadmap.",
+    a: "Yes. Download the font file from a font's page and install it, or publish a page other people can type on. You can also download a PNG or SVG.",
   },
 ];
 

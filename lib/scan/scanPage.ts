@@ -21,6 +21,8 @@ export type GlyphMetrics = {
   heightU: number;
   /** Top of the bitmap relative to the baseline (negative = above). */
   topU: number;
+  /** Margin on each side of the ink, set by the repair pass. */
+  sideU?: number;
 };
 
 export type ScannedGlyph = {

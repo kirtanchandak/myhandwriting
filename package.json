@@ -11,6 +11,7 @@
     "test": "vitest run",
     "samples": "tsx scripts/make-samples.ts",
     "debug-scan": "tsx scripts/debug-scan.ts",
+    "render-sample": "tsx scripts/render-sample.ts",
     "test:watch": "vitest",
     "bench-models": "node --env-file=.env.local --import tsx scripts/bench-models.ts"
   },
